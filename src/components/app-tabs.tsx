@@ -3,10 +3,12 @@ import { Tabs } from 'expo-router';
 import { useColorScheme } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAuth } from '@/context/AuthContext';
 
 export default function AppTabs() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' || !scheme ? 'light' : scheme];
+  const { user } = useAuth();
 
   return (
     <Tabs
@@ -42,8 +44,19 @@ export default function AppTabs() {
         name="cart"
         options={{
           title: 'Cart',
+          href: user?.role === 'admin' ? null : undefined,
           tabBarIcon: ({ color, size }) => (
             <MaterialCommunityIcons name="cart-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="appointments"
+        options={{
+          title: 'Appointments',
+          href: user?.role === 'admin' ? undefined : '/appointments', // Optional: hide from admin if requested, but instructions said "when client takes display there", meaning client side. Usually admin might want to see it too, but let's just make it visible for everyone or just client. Let's make it visible.
+          tabBarIcon: ({ color, size }) => (
+            <MaterialCommunityIcons name="calendar-clock-outline" size={size} color={color} />
           ),
         }}
       />

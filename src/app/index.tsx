@@ -8,11 +8,13 @@ import { useColorScheme } from 'react-native';
 import { dataService, Product, CAMEROON_TOWNS, CATEGORIES } from '../services/dataService';
 import ProductDetailView from '../components/shop/ProductDetailView';
 import { useAuth } from '../context/AuthContext';
+import { useRouter } from 'expo-router';
 
 export default function HomeScreen() {
   const { signOut } = useAuth();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' || !scheme ? 'light' : scheme];
+  const router = useRouter();
 
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -243,9 +245,32 @@ export default function HomeScreen() {
           {/* Main Feed Content Area */}
           <View style={styles.mainContent}>
             
+            {/* Sell Banner */}
+            <Pressable
+              style={({pressed}) => [
+                {
+                  backgroundColor: colors.primary,
+                  padding: Spacing.three,
+                  borderRadius: 12,
+                  marginBottom: Spacing.three,
+                  flexDirection: 'row',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                },
+                pressed && { opacity: 0.9 }
+              ]}
+              onPress={() => router.push('/profile')}
+            >
+              <View>
+                <ThemedText style={{ color: '#FFF', fontWeight: '800', fontSize: 16 }}>💰 Got a device to sell?</ThemedText>
+                <ThemedText style={{ color: '#FFF', fontSize: 13, opacity: 0.9 }}>Get a cash quote instantly.</ThemedText>
+              </View>
+              <ThemedText style={{ color: '#FFF', fontSize: 20 }}>→</ThemedText>
+            </Pressable>
+
             {/* Category horizontal scrolling bar */}
             <View style={styles.categoryScrollerContainer}>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryScroller}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryScroller}>
                 <Pressable
                   style={[
                     styles.categoryBadge,

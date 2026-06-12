@@ -7,6 +7,8 @@ import { Colors, Spacing } from '@/constants/theme';
 import { useColorScheme } from 'react-native';
 import { useAuth } from '../context/AuthContext';
 import { CAMEROON_TOWNS, CATEGORIES, dataService } from '../services/dataService';
+import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 
 interface OrderItem {
   product: {
@@ -39,11 +41,15 @@ export default function ProfileScreen() {
   const { user, signOut } = useAuth();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' || !scheme ? 'light' : scheme];
+  const router = useRouter();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Admin states
+  const [adminStats, setAdminStats] = useState({ revenue: 0, inventory: 0, productsCount: 0, customersCount: 0, tradeInRequests: 0 });
+  const [tradeIns, setTradeIns] = useState<any[]>([]);
+  
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newPrice, setNewPrice] = useState('');
@@ -51,23 +57,60 @@ export default function ProfileScreen() {
   const [newCategory, setNewCategory] = useState('Phones');
   const [newQuality, setNewQuality] = useState<'A' | 'B' | 'C'>('A');
   const [newLocation, setNewLocation] = useState('Douala');
-  const [newImage, setNewImage] = useState('https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=500&auto=format&fit=crop');
+  const [newImage, setNewImage] = useState<string | null>(null);
   const [isSubmittingProduct, setIsSubmittingProduct] = useState(false);
+
+  // Client states
+  const [showSellModal, setShowSellModal] = useState(false);
+  const [sellDevice, setSellDevice] = useState('');
+  const [sellCondition, setSellCondition] = useState('');
+  const [sellPrice, setSellPrice] = useState('');
+  const [isSubmittingSell, setIsSubmittingSell] = useState(false);
+
+  const handlePickProductImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        alert('Permission to access media library is required!');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setNewImage(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error('Error picking product image:', err);
+      alert('Failed to select image.');
+    }
+  };
 
   const screenWidth = Dimensions.get('window').width;
   const isLargeScreen = screenWidth > 800;
 
   useEffect(() => {
-    loadOrders();
-  }, []);
+    loadData();
+  }, [user]);
 
-  const loadOrders = async () => {
+  const loadData = async () => {
     setLoading(true);
     try {
       const list = await dataService.getOrders();
       setOrders(list as any[]);
+
+      if (user?.role === 'admin') {
+        const stats = await dataService.getAdminStats();
+        setAdminStats(stats);
+        const reqs = await dataService.getTradeInRequests();
+        setTradeIns(reqs);
+      }
     } catch (err) {
-      console.error('Failed to load orders:', err);
+      console.error('Failed to load profile data:', err);
     } finally {
       setLoading(false);
     }
@@ -98,18 +141,19 @@ export default function ProfileScreen() {
   };
 
   const handleAddProduct = async () => {
-    if (!newTitle || !newPrice || !newDesc) {
-      alert('Please fill in all fields.');
+    if (!newTitle || !newPrice || !newDesc || !newImage) {
+      alert('Please fill in all fields and choose a product photo.');
       return;
     }
 
     setIsSubmittingProduct(true);
     try {
+      const uploadedUrl = await dataService.uploadImage('product-images', newImage);
       await dataService.createProduct({
         title: newTitle,
         description: newDesc,
         price: parseFloat(newPrice),
-        images: [newImage],
+        images: [uploadedUrl],
         location: newLocation,
         category: newCategory,
         quality: newQuality,
@@ -125,10 +169,68 @@ export default function ProfileScreen() {
       setNewTitle('');
       setNewPrice('');
       setNewDesc('');
+      setNewImage(null);
+      loadData();
     } catch (err) {
       console.error('Failed to add product:', err);
+      alert('Error creating product: ' + (err as Error).message);
     } finally {
       setIsSubmittingProduct(false);
+    }
+  };
+
+  const handleSellSubmit = async () => {
+    if (!sellDevice || !sellCondition || !sellPrice) {
+      alert('Please fill in all fields.');
+      return;
+    }
+    setIsSubmittingSell(true);
+    try {
+      // 1. Log the trade-in request
+      await dataService.createTradeInRequest(sellDevice, sellCondition, parseFloat(sellPrice));
+      
+      // 2. Create a "Trade-In" product to act as the chat anchor (stock 0 so it's not buyable)
+      const tradeInProduct = await dataService.createProduct({
+        title: `Sell Offer: ${sellDevice}`,
+        description: `Condition: ${sellCondition}`,
+        price: parseFloat(sellPrice),
+        images: ['https://images.unsplash.com/photo-1588508065123-287b28e01397?w=500&auto=format&fit=crop'], // Generic trade-in image
+        location: user?.address || 'Platform',
+        category: 'Accessories', 
+        quality: 'C',
+        warranty_days: 0,
+        stock_quantity: 0,
+        specs: { tradeIn: 'true' }
+      });
+
+      // 3. Create the chat room for this trade-in
+      const roomId = await dataService.createChatRoom(tradeInProduct.id);
+      
+      // 4. Send the automated first message from the client
+      await dataService.sendMessage(roomId, `Hello, I would like to sell my device.\n\nDevice: ${sellDevice}\nCondition: ${sellCondition}\nMy Proposed Price: ${parseFloat(sellPrice).toLocaleString()} FCFA`);
+
+      alert('Your sell request has been submitted! We have opened a support chat for you.');
+      
+      setShowSellModal(false);
+      setSellDevice('');
+      setSellCondition('');
+      setSellPrice('');
+      
+      // Navigate to chat
+      router.push('/chat');
+    } catch (err: any) {
+      alert('Error: ' + err.message);
+    } finally {
+      setIsSubmittingSell(false);
+    }
+  };
+
+  const updateTradeInStatus = async (id: string, status: 'accepted' | 'rejected') => {
+    try {
+      await dataService.updateTradeInStatus(id, status);
+      loadData();
+    } catch (err) {
+      console.error('Failed to update status', err);
     }
   };
 
@@ -176,7 +278,34 @@ export default function ProfileScreen() {
           {isAdmin ? (
             <View style={styles.section}>
               <View style={styles.sectionHeader}>
-                <ThemedText type="subtitle" style={styles.sectionTitle}>Admin Management</ThemedText>
+                <ThemedText type="subtitle" style={styles.sectionTitle}>Dashboard Overview</ThemedText>
+                <Pressable onPress={loadData} style={styles.refreshBtn}>
+                  <ThemedText type="small" style={{ color: colors.primary }}>🔄 Refresh</ThemedText>
+                </Pressable>
+              </View>
+
+              {/* Admin Stats Grid */}
+              <View style={styles.statsGrid}>
+                <View style={[styles.statCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
+                  <ThemedText type="small" style={{ opacity: 0.6 }}>Total Revenue</ThemedText>
+                  <ThemedText type="subtitle" style={{ color: colors.success }}>{adminStats.revenue.toLocaleString()} FCFA</ThemedText>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
+                  <ThemedText type="small" style={{ opacity: 0.6 }}>Inventory Items</ThemedText>
+                  <ThemedText type="subtitle" style={{ color: colors.primary }}>{adminStats.inventory}</ThemedText>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
+                  <ThemedText type="small" style={{ opacity: 0.6 }}>Registered Clients</ThemedText>
+                  <ThemedText type="subtitle" style={{ color: '#F57F17' }}>{adminStats.customersCount}</ThemedText>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: colors.backgroundElement, borderColor: colors.backgroundSelected }]}>
+                  <ThemedText type="small" style={{ opacity: 0.6 }}>Pending Sell Req.</ThemedText>
+                  <ThemedText type="subtitle" style={{ color: '#8E24AA' }}>{adminStats.tradeInRequests}</ThemedText>
+                </View>
+              </View>
+
+              <View style={[styles.sectionHeader, { marginTop: Spacing.four }]}>
+                <ThemedText type="subtitle" style={styles.sectionTitle}>Inventory Management</ThemedText>
                 <Pressable
                   style={[styles.addBtn, { backgroundColor: colors.primary }]}
                   onPress={() => setShowAddProductModal(!showAddProductModal)}
@@ -266,13 +395,22 @@ export default function ProfileScreen() {
                   </View>
 
                   <View style={styles.inputGroup}>
-                    <ThemedText type="smallBold">Product Image URL</ThemedText>
-                    <TextInput
-                      style={[styles.input, { borderColor: colors.textSecondary + '40', color: colors.text, backgroundColor: colors.background }]}
-                      placeholder="https://..."
-                      value={newImage}
-                      onChangeText={setNewImage}
-                    />
+                    <ThemedText type="smallBold">Product Photo</ThemedText>
+                    {newImage ? (
+                      <View style={styles.imageUploadPreviewRow}>
+                        <Image source={{ uri: newImage }} style={styles.productUploadThumb} />
+                        <Pressable onPress={() => setNewImage(null)} style={[styles.uploadBtn, { backgroundColor: '#FF3B30', marginLeft: Spacing.two }]}>
+                          <ThemedText style={{ color: '#FFF', fontWeight: '700' }}>✕ Remove Photo</ThemedText>
+                        </Pressable>
+                      </View>
+                    ) : (
+                      <Pressable
+                        style={[styles.uploadBtn, { backgroundColor: colors.primary + '15', borderColor: colors.primary, borderWidth: 1, borderStyle: 'dashed' }]}
+                        onPress={handlePickProductImage}
+                      >
+                        <ThemedText style={{ color: colors.primary, fontWeight: '700' }}>📷 Upload Device Image</ThemedText>
+                      </Pressable>
+                    )}
                   </View>
 
                   <Pressable
@@ -293,117 +431,235 @@ export default function ProfileScreen() {
                 </View>
               )}
 
+              {/* Client Trade-in Requests */}
+              <View style={[styles.adminOrdersHeader, { marginTop: Spacing.four }]}>
+                <ThemedText type="smallBold" style={{ fontSize: 18 }}>Client Sell Requests</ThemedText>
+              </View>
+
+              {tradeIns.length === 0 ? (
+                <ThemedText style={{ opacity: 0.6, paddingVertical: Spacing.two }}>No pending requests.</ThemedText>
+              ) : (
+                tradeIns.map((req: any) => (
+                  <View key={req.id} style={[styles.orderCard, { backgroundColor: colors.backgroundElement }]}>
+                    <View style={styles.orderHeaderRow}>
+                      <ThemedText type="smallBold">{req.client_name}</ThemedText>
+                      <View style={[styles.statusBadge, { backgroundColor: req.status === 'pending' ? '#FFF8E1' : (req.status === 'accepted' ? '#E2F3E4' : '#FFEBEE') }]}>
+                        <ThemedText style={{ fontSize: 10, color: req.status === 'pending' ? '#F57F17' : (req.status === 'accepted' ? colors.success : '#D32F2F') }}>
+                          {req.status.toUpperCase()}
+                        </ThemedText>
+                      </View>
+                    </View>
+                    <ThemedText type="small">Device: {req.device_model}</ThemedText>
+                    <ThemedText type="small">Condition: {req.condition}</ThemedText>
+                    <ThemedText type="smallBold" style={{ marginTop: Spacing.one }}>Proposed Price: {req.proposed_price.toLocaleString()} FCFA</ThemedText>
+                    
+                    {req.status === 'pending' && (
+                      <View style={[styles.statusControls, { marginTop: Spacing.two }]}>
+                        <Pressable onPress={() => updateTradeInStatus(req.id, 'accepted')} style={[styles.statusBtn, { backgroundColor: colors.success, borderColor: colors.success, paddingVertical: 8 }]}>
+                          <ThemedText style={{ color: '#FFF', fontSize: 12, fontWeight: '700' }}>Accept</ThemedText>
+                        </Pressable>
+                        <Pressable onPress={() => updateTradeInStatus(req.id, 'rejected')} style={[styles.statusBtn, { backgroundColor: '#D32F2F', borderColor: '#D32F2F', paddingVertical: 8 }]}>
+                          <ThemedText style={{ color: '#FFF', fontSize: 12, fontWeight: '700' }}>Reject</ThemedText>
+                        </Pressable>
+                      </View>
+                    )}
+                  </View>
+                ))
+              )}
+
               {/* Manage Orders */}
-              <View style={styles.adminOrdersHeader}>
+              <View style={[styles.adminOrdersHeader, { marginTop: Spacing.four }]}>
                 <ThemedText type="smallBold" style={{ fontSize: 18 }}>Client Orders Panel</ThemedText>
-                <Pressable onPress={loadOrders} style={styles.refreshBtn}>
-                  <ThemedText type="small" style={{ color: colors.primary }}>🔄 Refresh</ThemedText>
-                </Pressable>
               </View>
 
               {orders.length === 0 ? (
                 <ThemedText style={{ opacity: 0.6, paddingVertical: Spacing.two }}>No orders placed yet.</ThemedText>
               ) : (
-                orders.map((order) => (
-                  <View key={order.id} style={[styles.orderCard, { backgroundColor: colors.backgroundElement }]}>
-                    <View style={styles.orderHeaderRow}>
-                      <ThemedText type="smallBold">Order ID: {order.id}</ThemedText>
-                      <ThemedText type="small" style={{ opacity: 0.6 }}>{new Date(order.created_at).toLocaleDateString()}</ThemedText>
-                    </View>
-
-                    {order.items.map((item, idx) => (
-                      <View key={idx} style={styles.orderItemRow}>
-                        <ThemedText type="small" style={{ flex: 2 }} numberOfLines={1}>{item.product.title}</ThemedText>
-                        <ThemedText type="small" style={{ flex: 1 }}>qty: {item.quantity}</ThemedText>
-                        <ThemedText type="smallBold" style={{ flex: 1, textAlign: 'right' }}>{(item.product.price * item.quantity).toLocaleString()} FCFA</ThemedText>
+                orders.map((order: any) => {
+                  const total = order.total ?? order.total_price ?? 0;
+                  return (
+                    <View key={order.id} style={[styles.orderCard, { backgroundColor: colors.backgroundElement }]}>
+                      <View style={styles.orderHeaderRow}>
+                        <ThemedText type="smallBold">Order ID: {order.id}</ThemedText>
+                        <ThemedText type="small" style={{ opacity: 0.6 }}>{new Date(order.created_at).toLocaleDateString()}</ThemedText>
                       </View>
-                    ))}
 
-                    <View style={styles.orderFooterRow}>
-                      <ThemedText type="smallBold">Total: {order.total.toLocaleString()} FCFA</ThemedText>
-                      <View style={styles.statusControls}>
-                        {['paid', 'shipped', 'delivered'].map((st) => (
-                          <Pressable
-                            key={st}
-                            style={[
-                              styles.statusBtn,
-                              { backgroundColor: colors.background },
-                              order.status === st && { backgroundColor: st === 'delivered' ? colors.success : colors.primary }
-                            ]}
-                            onPress={() => updateOrderStatus(order.id, st as any)}
-                          >
-                            <ThemedText style={[styles.statusBtnText, order.status === st && { color: '#FFF' }]}>
-                              {st}
-                            </ThemedText>
-                          </Pressable>
-                        ))}
+                      {(order.items || []).map((item: any, idx: number) => {
+                        const title = item.product?.title ?? 'Product';
+                        const price = item.product?.price ?? item.price ?? 0;
+                        return (
+                          <View key={idx} style={styles.orderItemRow}>
+                            <ThemedText type="small" style={{ flex: 2 }} numberOfLines={1}>{title}</ThemedText>
+                            <ThemedText type="small" style={{ flex: 1 }}>qty: {item.quantity}</ThemedText>
+                            <ThemedText type="smallBold" style={{ flex: 1, textAlign: 'right' }}>{(price * item.quantity).toLocaleString()} FCFA</ThemedText>
+                          </View>
+                        );
+                      })}
+
+                      <View style={styles.orderFooterRow}>
+                        <ThemedText type="smallBold">Total: {total.toLocaleString()} FCFA</ThemedText>
+                        <View style={styles.statusControls}>
+                          {['paid', 'shipped', 'delivered'].map((st) => (
+                            <Pressable
+                              key={st}
+                              style={[
+                                styles.statusBtn,
+                                { backgroundColor: colors.background },
+                                order.status === st && { backgroundColor: st === 'delivered' ? colors.success : colors.primary }
+                              ]}
+                              onPress={() => updateOrderStatus(order.id, st as any)}
+                            >
+                              <ThemedText style={[styles.statusBtnText, order.status === st && { color: '#FFF' }]}>
+                                {st}
+                              </ThemedText>
+                            </Pressable>
+                          ))}
+                        </View>
                       </View>
                     </View>
-                  </View>
-                ))
+                  );
+                })
               )}
 
             </View>
           ) : (
             /* CLIENT DASHBOARD INTERFACE */
             <View style={styles.section}>
+              {/* Sell Your Device Section */}
+              <View style={[styles.orderCard, { backgroundColor: colors.backgroundElement, borderColor: colors.primary, borderWidth: 1, padding: Spacing.four }]}>
+                <View style={styles.sectionHeader}>
+                  <ThemedText type="subtitle" style={{ fontSize: 18 }}>Sell Your Device</ThemedText>
+                </View>
+                <ThemedText type="small" style={{ opacity: 0.7, marginVertical: Spacing.two }}>
+                  Got an old device you want to sell? Submit a request and we will offer you the best price in the market.
+                </ThemedText>
+                
+                {showSellModal ? (
+                  <View style={{ gap: Spacing.three, marginTop: Spacing.two }}>
+                    <View style={styles.inputGroup}>
+                      <ThemedText type="smallBold">Device Name / Model</ThemedText>
+                      <TextInput
+                        style={[styles.input, { borderColor: colors.textSecondary + '40', color: colors.text, backgroundColor: colors.background }]}
+                        placeholder="e.g. iPhone 12 Pro 128GB"
+                        value={sellDevice}
+                        onChangeText={setSellDevice}
+                      />
+                    </View>
+                    <View style={styles.inputGroup}>
+                      <ThemedText type="smallBold">Condition Description</ThemedText>
+                      <TextInput
+                        style={[styles.input, { height: 60, borderColor: colors.textSecondary + '40', color: colors.text, backgroundColor: colors.background }]}
+                        placeholder="e.g. Broken screen, battery 80%"
+                        multiline
+                        value={sellCondition}
+                        onChangeText={setSellCondition}
+                      />
+                    </View>
+                    <View style={styles.inputGroup}>
+                      <ThemedText type="smallBold">Your Proposed Price (FCFA)</ThemedText>
+                      <TextInput
+                        style={[styles.input, { borderColor: colors.textSecondary + '40', color: colors.text, backgroundColor: colors.background }]}
+                        placeholder="e.g. 150000"
+                        keyboardType="numeric"
+                        value={sellPrice}
+                        onChangeText={setSellPrice}
+                      />
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: Spacing.two }}>
+                      <Pressable
+                        style={[styles.submitBtn, { backgroundColor: colors.textSecondary, flex: 1 }]}
+                        onPress={() => setShowSellModal(false)}
+                      >
+                        <ThemedText style={{ color: '#FFF', fontWeight: '700' }}>Cancel</ThemedText>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.submitBtn, { backgroundColor: colors.primary, flex: 1 }]}
+                        onPress={handleSellSubmit}
+                        disabled={isSubmittingSell}
+                      >
+                        {isSubmittingSell ? <ActivityIndicator color="#FFF" /> : <ThemedText style={{ color: '#FFF', fontWeight: '700' }}>Submit</ThemedText>}
+                      </Pressable>
+                    </View>
+                  </View>
+                ) : (
+                  <Pressable
+                    style={[styles.submitBtn, { backgroundColor: colors.primary, marginTop: Spacing.one }]}
+                    onPress={() => setShowSellModal(true)}
+                  >
+                    <ThemedText style={{ color: '#FFF', fontWeight: '800' }}>Request a Quote</ThemedText>
+                  </Pressable>
+                )}
+              </View>
+
               <ThemedText type="subtitle" style={styles.sectionTitle}>Your Purchase History & Warranty</ThemedText>
+              <Pressable onPress={loadData} style={styles.refreshBtn}>
+                <ThemedText type="small" style={{ color: colors.primary }}>🔄 Refresh History</ThemedText>
+              </Pressable>
 
               {orders.length === 0 ? (
                 <View style={styles.emptyContainer}>
                   <ThemedText style={{ opacity: 0.6 }}>You haven't placed any orders yet.</ThemedText>
                 </View>
               ) : (
-                orders.map((order) => (
-                  <View key={order.id} style={[styles.orderCard, { backgroundColor: colors.backgroundElement }]}>
-                    <View style={styles.orderHeaderRow}>
-                      <ThemedText type="smallBold">Order Ref: {order.id}</ThemedText>
-                      <View style={[styles.statusBadge, { backgroundColor: order.status === 'delivered' ? '#E2F3E4' : '#FFF8E1' }]}>
-                        <ThemedText type="smallBold" style={{ fontSize: 11, color: order.status === 'delivered' ? colors.success : '#F57F17' }}>
-                          Status: {order.status.toUpperCase()}
+                orders.map((order: any) => {
+                  const total = order.total ?? order.total_price ?? 0;
+                  const paymentGateway = order.paymentGateway ?? order.payment_gateway ?? 'MoMo';
+                  const deliveryType = order.deliveryType ?? order.delivery_type ?? 'pickup';
+
+                  return (
+                    <View key={order.id} style={[styles.orderCard, { backgroundColor: colors.backgroundElement }]}>
+                      <View style={styles.orderHeaderRow}>
+                        <ThemedText type="smallBold">Order Ref: {order.id}</ThemedText>
+                        <View style={[styles.statusBadge, { backgroundColor: order.status === 'delivered' ? '#E2F3E4' : '#FFF8E1' }]}>
+                          <ThemedText type="smallBold" style={{ fontSize: 11, color: order.status === 'delivered' ? colors.success : '#F57F17' }}>
+                            Status: {order.status ? order.status.toUpperCase() : 'PENDING'}
+                          </ThemedText>
+                        </View>
+                      </View>
+
+                      {/* Order Items */}
+                      {(order.items || []).map((item: any, idx: number) => {
+                        const daysLeft = getWarrantyDaysLeft(order.warranty_expiry);
+                        const percentLeft = (daysLeft / 30) * 100;
+                        const title = item.product?.title ?? 'Product';
+                        const quality = item.product?.quality ?? 'A';
+                        const imageUri = item.product?.images?.[0] || 'https://via.placeholder.com/150';
+                        
+                        return (
+                          <View key={idx} style={styles.clientItemCard}>
+                            <View style={styles.orderItemRow}>
+                              <Image source={{ uri: imageUri }} style={styles.clientItemImg} resizeMode="cover" />
+                              <View style={{ flex: 1 }}>
+                                <ThemedText type="smallBold" numberOfLines={1}>{title}</ThemedText>
+                                <ThemedText type="small" style={{ opacity: 0.6 }}>Grade {quality} | Qty: {item.quantity}</ThemedText>
+                              </View>
+                            </View>
+
+                            {/* Warranty progress bar display */}
+                            <View style={styles.warrantyTracker}>
+                              <View style={styles.warrantyHeader}>
+                                <ThemedText type="smallBold" style={{ fontSize: 12, color: colors.success }}>
+                                  🛡️ Warranty Coverage: {daysLeft} days remaining
+                                </ThemedText>
+                                <ThemedText type="small" style={{ fontSize: 11, opacity: 0.5 }}>Expired on day 30</ThemedText>
+                              </View>
+                              <View style={[styles.progressBarBg, { backgroundColor: colors.background }]}>
+                                <View style={[styles.progressBarFill, { width: `${percentLeft}%`, backgroundColor: colors.success }]} />
+                              </View>
+                            </View>
+                          </View>
+                        );
+                      })}
+
+                      <View style={styles.clientOrderSummary}>
+                        <ThemedText type="small">Payment: {paymentGateway} | Delivery: {deliveryType.toUpperCase()}</ThemedText>
+                        <ThemedText type="smallBold" style={{ color: colors.primary }}>
+                          Grand Total: {total.toLocaleString()} FCFA
                         </ThemedText>
                       </View>
                     </View>
-
-                    {/* Order Items */}
-                    {order.items.map((item, idx) => {
-                      const daysLeft = getWarrantyDaysLeft(order.warranty_expiry);
-                      const percentLeft = (daysLeft / 30) * 100;
-                      
-                      return (
-                        <View key={idx} style={styles.clientItemCard}>
-                          <View style={styles.orderItemRow}>
-                            <Image source={{ uri: item.product.images[0] }} style={styles.clientItemImg} resizeMode="cover" />
-                            <View style={{ flex: 1 }}>
-                              <ThemedText type="smallBold" numberOfLines={1}>{item.product.title}</ThemedText>
-                              <ThemedText type="small" style={{ opacity: 0.6 }}>Grade {item.product.quality} | Qty: {item.quantity}</ThemedText>
-                            </View>
-                          </View>
-
-                          {/* Warranty progress bar display */}
-                          <View style={styles.warrantyTracker}>
-                            <View style={styles.warrantyHeader}>
-                              <ThemedText type="smallBold" style={{ fontSize: 12, color: colors.success }}>
-                                🛡️ Warranty Coverage: {daysLeft} days remaining
-                              </ThemedText>
-                              <ThemedText type="small" style={{ fontSize: 11, opacity: 0.5 }}>Expired on day 30</ThemedText>
-                            </View>
-                            <View style={[styles.progressBarBg, { backgroundColor: colors.background }]}>
-                              <View style={[styles.progressBarFill, { width: `${percentLeft}%`, backgroundColor: colors.success }]} />
-                            </View>
-                          </View>
-                        </View>
-                      );
-                    })}
-
-                    <View style={styles.clientOrderSummary}>
-                      <ThemedText type="small">Payment: {order.paymentGateway} | Delivery: {order.deliveryType.toUpperCase()}</ThemedText>
-                      <ThemedText type="smallBold" style={{ color: colors.primary }}>
-                        Grand Total: {order.total.toLocaleString()} FCFA
-                      </ThemedText>
-                    </View>
-                  </View>
-                ))
+                  );
+                })
               )}
             </View>
           )}
@@ -425,6 +681,24 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.three,
+  },
+  statCard: {
+    flex: 1,
+    minWidth: '45%',
+    padding: Spacing.three,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: Spacing.one,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   scrollContent: {
     padding: Spacing.three,
@@ -669,5 +943,23 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginTop: Spacing.one,
+  },
+  imageUploadPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: Spacing.one,
+  },
+  productUploadThumb: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
+  },
+  uploadBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

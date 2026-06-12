@@ -32,10 +32,7 @@ export const CAMEROON_TOWNS = [
 export const CATEGORIES = [
   'Phones',
   'Laptops',
-  'Tablets',
   'Accessories',
-  'Audio',
-  'Gaming',
 ] as const;
 
 // Seed Mock Data
@@ -67,34 +64,6 @@ const MOCK_PRODUCTS: Product[] = [
     warranty_days: 30,
     stock_quantity: 1,
     created_at: new Date(Date.now() - 86400000).toISOString(),
-  },
-  {
-    id: 'prod-3',
-    title: 'iPad Air 5th Gen (Wi-Fi)',
-    description: 'Used tablet with moderate scratches on the back casing. Screen is protected by a screen guard.',
-    price: 290000,
-    images: ['https://images.unsplash.com/photo-1544244015-0df4b3ffc6b0?w=500&auto=format&fit=crop'],
-    location: 'Buea',
-    category: 'Tablets',
-    specs: { storage: '64GB', chip: 'M1', color: 'Space Gray' },
-    quality: 'C',
-    warranty_days: 30,
-    stock_quantity: 2,
-    created_at: new Date(Date.now() - 172800000).toISOString(),
-  },
-  {
-    id: 'prod-4',
-    title: 'Sony WH-1000XM4 Headphones',
-    description: 'Grade A wireless noise-canceling headphones. Barely used, sounds outstanding. Carrying case and auxiliary cables included.',
-    price: 150000,
-    images: ['https://images.unsplash.com/photo-1505740420928-5e560c06d30e?w=500&auto=format&fit=crop'],
-    location: 'Bamenda',
-    category: 'Audio',
-    specs: { batteryLife: '30 hours', connection: 'Bluetooth 5.0' },
-    quality: 'A',
-    warranty_days: 30,
-    stock_quantity: 5,
-    created_at: new Date(Date.now() - 259200000).toISOString(),
   },
   {
     id: 'prod-5',
@@ -154,11 +123,33 @@ export interface ChatMessage {
   room_id: string;
   sender_id: string;
   message: string;
+  image_url?: string;
   created_at: string;
   sender_name?: string;
 }
 
+export interface Appointment {
+  id: string;
+  room_id: string;
+  client_id?: string;
+  appointment_date: string;
+  status: 'scheduled' | 'completed' | 'cancelled';
+  created_at: string;
+}
+
+export interface TradeInRequest {
+  id: string;
+  client_id?: string;
+  client_name?: string;
+  device_model: string;
+  condition: string;
+  proposed_price: number;
+  status: 'pending' | 'accepted' | 'rejected';
+  created_at: string;
+}
+
 const ORDERS_KEY = 'revive_market_orders';
+const TRADEIN_KEY = 'revive_market_tradein';
 
 export const dataService = {
   isMock: () => !process.env.EXPO_PUBLIC_SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL.includes('placeholder'),
@@ -186,13 +177,13 @@ export const dataService = {
           );
         }
         if (category) {
-          result = result.filter((p) => p.category === category);
+          result = result.filter((p) => p.category.toLowerCase() === category.toLowerCase());
         }
         if (quality) {
-          result = result.filter((p) => p.quality === quality);
+          result = result.filter((p) => p.quality.toLowerCase() === quality.toLowerCase());
         }
         if (location) {
-          result = result.filter((p) => p.location === location);
+          result = result.filter((p) => p.location.toLowerCase() === location.toLowerCase());
         }
         if (minPrice !== undefined) {
           result = result.filter((p) => p.price >= minPrice);
@@ -211,13 +202,13 @@ export const dataService = {
           query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
         }
         if (category) {
-          query = query.eq('category', category);
+          query = query.ilike('category', category);
         }
         if (quality) {
-          query = query.eq('quality', quality);
+          query = query.ilike('quality', quality);
         }
         if (location) {
-          query = query.eq('location', location);
+          query = query.ilike('location', location);
         }
         if (minPrice !== undefined) {
           query = query.gte('price', minPrice);
@@ -230,6 +221,56 @@ export const dataService = {
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
       return (data || []) as Product[];
+    }
+  },
+
+  async getAdminStats() {
+    if (this.isMock()) {
+      const ordersStr = await storage.getItem(ORDERS_KEY);
+      const orders = ordersStr ? JSON.parse(ordersStr) : [];
+      const tradeStr = await storage.getItem(TRADEIN_KEY);
+      const tradeIns = tradeStr ? JSON.parse(tradeStr) : [];
+      
+      const revenue = orders
+        .filter((o: any) => o.status === 'paid' || o.status === 'delivered')
+        .reduce((sum: number, o: any) => sum + (o.total ?? o.total_price ?? 0), 0);
+        
+      const inventory = localProductsDb.reduce((sum, p) => sum + p.stock_quantity, 0);
+
+      return {
+        revenue,
+        inventory,
+        productsCount: localProductsDb.length,
+        customersCount: 1, // Mock
+        tradeInRequests: tradeIns.filter((t: any) => t.status === 'pending').length
+      };
+    } else {
+      // Supabase aggregations
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // 1. Revenue
+      const { data: orders } = await supabase.from('orders').select('total_price, status').in('status', ['paid', 'delivered', 'shipped']);
+      const revenue = (orders || []).reduce((sum, o) => sum + parseFloat(o.total_price || 0), 0);
+
+      // 2. Inventory & Products Count
+      const { data: products } = await supabase.from('products').select('stock_quantity');
+      const inventory = (products || []).reduce((sum, p) => sum + (p.stock_quantity || 0), 0);
+      const productsCount = (products || []).length;
+
+      // 3. Customers count
+      const { count: customersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'client');
+
+      // 4. Pending Trade-Ins
+      const { count: tradeInRequests } = await supabase.from('trade_in_requests').select('*', { count: 'exact', head: true }).eq('status', 'pending');
+
+      return {
+        revenue,
+        inventory,
+        productsCount,
+        customersCount: customersCount || 0,
+        tradeInRequests: tradeInRequests || 0
+      };
     }
   },
 
@@ -577,13 +618,14 @@ export const dataService = {
         room_id: msg.room_id,
         sender_id: msg.sender_id,
         message: msg.message,
+        image_url: msg.image_url,
         created_at: msg.created_at,
         sender_name: msg.sender?.name || 'User'
       }));
     }
   },
 
-  async sendMessage(roomId: string, message: string): Promise<ChatMessage> {
+  async sendMessage(roomId: string, message: string, imageUrl?: string): Promise<ChatMessage> {
     if (this.isMock()) {
       const { data: { user } } = await supabase.auth.getUser(); // Safe local fallback if any
       const mockUser = user || { id: 'buyer-id', user_metadata: { name: 'You' } };
@@ -593,19 +635,27 @@ export const dataService = {
         sender_id: mockUser.id,
         sender_name: mockUser.user_metadata?.name || 'You',
         message,
+        image_url: imageUrl,
         created_at: new Date().toISOString()
       };
     } else {
       const { data: { user: authUser } } = await supabase.auth.getUser();
       if (!authUser) throw new Error('Not authenticated');
 
+      // Build payload conditionally — only include image_url if provided
+      // This prevents PGRST204 errors if the column migration hasn't been applied yet
+      const payload: Record<string, any> = {
+        room_id: roomId,
+        sender_id: authUser.id,
+        message: message || '',
+      };
+      if (imageUrl) {
+        payload.image_url = imageUrl;
+      }
+
       const { data, error } = await supabase
         .from('chat_messages')
-        .insert([{
-          room_id: roomId,
-          sender_id: authUser.id,
-          message: message
-        }])
+        .insert([payload])
         .select(`
           *,
           sender:profiles(name)
@@ -619,6 +669,7 @@ export const dataService = {
         room_id: data.room_id,
         sender_id: data.sender_id,
         message: data.message,
+        image_url: data.image_url ?? undefined,
         created_at: data.created_at,
         sender_name: data.sender?.name || 'You'
       };
@@ -665,6 +716,208 @@ export const dataService = {
       }]);
 
       return newRoom.id;
+    }
+  },
+
+  async getAppointments(roomId: string): Promise<Appointment[]> {
+    if (this.isMock()) {
+      const appsStr = await storage.getItem('revive_market_appointments');
+      const list = appsStr ? JSON.parse(appsStr) : [];
+      return list.filter((app: any) => app.room_id === roomId);
+    } else {
+      const { data, error } = await supabase
+        .from('appointments')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('appointment_date', { ascending: true });
+
+      if (error) throw error;
+      return data || [];
+    }
+  },
+
+  async getAllAppointments(): Promise<Appointment[]> {
+    if (this.isMock()) {
+      const appsStr = await storage.getItem('revive_market_appointments');
+      const list = appsStr ? JSON.parse(appsStr) : [];
+      return list;
+    } else {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single();
+
+      let query = supabase.from('appointments').select('*').order('appointment_date', { ascending: true });
+      if (profile?.role !== 'admin') {
+        query = query.eq('client_id', user.id);
+      }
+
+      const { data, error } = await query;
+      if (error) throw error;
+      return data || [];
+    }
+  },
+
+  async createAppointment(roomId: string, dateStr: string): Promise<Appointment> {
+    if (this.isMock()) {
+      const appsStr = await storage.getItem('revive_market_appointments');
+      const list = appsStr ? JSON.parse(appsStr) : [];
+      
+      const existing = list.find((a: any) => a.appointment_date === dateStr && a.status !== 'cancelled');
+      if (existing) throw new Error('This time slot is already booked.');
+
+      const newApp: Appointment = {
+        id: 'app-' + Math.random().toString(36).substring(2, 9),
+        room_id: roomId,
+        client_id: 'buyer-id',
+        appointment_date: dateStr,
+        status: 'scheduled',
+        created_at: new Date().toISOString()
+      };
+      list.push(newApp);
+      await storage.setItem('revive_market_appointments', JSON.stringify(list));
+      return newApp;
+    } else {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      // Check double booking
+      const { data: existingApps, error: checkErr } = await supabase
+        .from('appointments')
+        .select('id')
+        .eq('appointment_date', dateStr)
+        .neq('status', 'cancelled');
+        
+      if (checkErr) throw checkErr;
+      if (existingApps && existingApps.length > 0) {
+        throw new Error('This time slot is already booked.');
+      }
+
+      const { data, error } = await supabase
+        .from('appointments')
+        .insert([{
+          room_id: roomId,
+          client_id: user.id,
+          appointment_date: dateStr,
+          status: 'scheduled'
+        }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      return data;
+    }
+  },
+
+  // --- TRADE-IN SERVICES ---
+  async getTradeInRequests(): Promise<TradeInRequest[]> {
+    if (this.isMock()) {
+      const tradeStr = await storage.getItem(TRADEIN_KEY);
+      return tradeStr ? JSON.parse(tradeStr) : [];
+    } else {
+      const { data, error } = await supabase
+        .from('trade_in_requests')
+        .select('*, client:profiles(name)')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      return (data || []).map((req: any) => ({
+        ...req,
+        client_name: req.client?.name || 'Client'
+      }));
+    }
+  },
+
+  async createTradeInRequest(device_model: string, condition: string, proposed_price: number): Promise<TradeInRequest> {
+    if (this.isMock()) {
+      const tradeStr = await storage.getItem(TRADEIN_KEY);
+      const list = tradeStr ? JSON.parse(tradeStr) : [];
+      const newReq: TradeInRequest = {
+        id: 'trade-' + Math.random().toString(36).substring(2, 9),
+        client_name: 'Mock Client',
+        device_model,
+        condition,
+        proposed_price,
+        status: 'pending',
+        created_at: new Date().toISOString()
+      };
+      list.unshift(newReq);
+      await storage.setItem(TRADEIN_KEY, JSON.stringify(list));
+      return newReq;
+    } else {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data, error } = await supabase
+        .from('trade_in_requests')
+        .insert([{
+          client_id: user.id,
+          device_model,
+          condition,
+          proposed_price,
+          status: 'pending'
+        }])
+        .select()
+        .single();
+        
+      if (error) throw error;
+      return data;
+    }
+  },
+
+  async updateTradeInStatus(requestId: string, status: TradeInRequest['status']): Promise<void> {
+    if (this.isMock()) {
+      const tradeStr = await storage.getItem(TRADEIN_KEY);
+      if (tradeStr) {
+        const list = JSON.parse(tradeStr);
+        const updated = list.map((r: any) => r.id === requestId ? { ...r, status } : r);
+        await storage.setItem(TRADEIN_KEY, JSON.stringify(updated));
+      }
+    } else {
+      const { error } = await supabase
+        .from('trade_in_requests')
+        .update({ status })
+        .eq('id', requestId);
+      if (error) throw error;
+    }
+  },
+
+  async uploadImage(bucket: string, fileUri: string): Promise<string> {
+    if (this.isMock()) {
+      return fileUri;
+    }
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const response = await fetch(fileUri);
+      const blob = await response.blob();
+      
+      const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(2, 9)}.jpg`;
+      const filePath = fileName;
+
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, blob, {
+          contentType: 'image/jpeg',
+          upsert: true
+        });
+
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(filePath);
+
+      return publicUrl;
+    } catch (err) {
+      console.warn('Supabase storage upload failed, falling back to local URI/base64:', err);
+      return fileUri;
     }
   }
 };

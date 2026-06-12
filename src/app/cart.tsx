@@ -22,6 +22,19 @@ export default function CartScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' || !scheme ? 'light' : scheme];
 
+  if (user?.role === 'admin') {
+    return (
+      <ThemedView style={[styles.container, styles.centerContainer, { padding: Spacing.four }]}>
+        <ThemedText type="subtitle" style={{ textAlign: 'center' }}>
+          Access Denied
+        </ThemedText>
+        <ThemedText style={{ opacity: 0.6, textAlign: 'center', marginTop: Spacing.two }}>
+          Administrators do not have access to the shopping cart or checkout flows.
+        </ThemedText>
+      </ThemedView>
+    );
+  }
+
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
   const [loading, setLoading] = useState(true);
 

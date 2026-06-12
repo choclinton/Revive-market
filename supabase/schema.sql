@@ -69,6 +69,9 @@ ALTER TABLE public.orders ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Allow clients to view their own orders" ON public.orders
     FOR SELECT USING (auth.uid() = client_id);
 
+CREATE POLICY "Allow clients to create their own orders" ON public.orders
+    FOR INSERT WITH CHECK (auth.uid() = client_id);
+
 CREATE POLICY "Allow admins to view/modify all orders" ON public.orders
     FOR ALL USING (
         EXISTS (
@@ -91,6 +94,14 @@ ALTER TABLE public.order_items ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow clients to view their own order items" ON public.order_items
     FOR SELECT USING (
+        EXISTS (
+            SELECT 1 FROM public.orders
+            WHERE public.orders.id = order_id AND public.orders.client_id = auth.uid()
+        )
+    );
+
+CREATE POLICY "Allow clients to create their own order items" ON public.order_items
+    FOR INSERT WITH CHECK (
         EXISTS (
             SELECT 1 FROM public.orders
             WHERE public.orders.id = order_id AND public.orders.client_id = auth.uid()
@@ -170,3 +181,51 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- ENABLE REALTIME FOR CHAT TABLES
+ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_messages;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.chat_rooms;
+
+-- ADD CHAT ATTACHMENTS COLUMN
+ALTER TABLE public.chat_messages ADD COLUMN IF NOT EXISTS image_url TEXT;
+
+-- CREATE APPOINTMENTS TABLE
+CREATE TABLE IF NOT EXISTS public.appointments (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    room_id UUID REFERENCES public.chat_rooms(id) ON DELETE CASCADE,
+    client_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+    appointment_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    status TEXT DEFAULT 'scheduled' CHECK (status IN ('scheduled', 'completed', 'cancelled')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+
+-- Enable RLS for Appointments
+ALTER TABLE public.appointments ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Allow participants to view appointments" ON public.appointments
+    FOR SELECT USING (
+        EXISTS (
+            SELECT 1 FROM public.chat_rooms
+            WHERE public.chat_rooms.id = room_id AND (
+                public.chat_rooms.buyer_id = auth.uid() OR
+                EXISTS (
+                    SELECT 1 FROM public.profiles
+                    WHERE public.profiles.id = auth.uid() AND public.profiles.role = 'admin'
+                )
+            )
+        )
+    );
+
+CREATE POLICY "Allow participants to create appointments" ON public.appointments
+    FOR INSERT WITH CHECK (
+        EXISTS (
+            SELECT 1 FROM public.chat_rooms
+            WHERE public.chat_rooms.id = room_id AND (
+                public.chat_rooms.buyer_id = auth.uid() OR
+                EXISTS (
+                    SELECT 1 FROM public.profiles
+                    WHERE public.profiles.id = auth.uid() AND public.profiles.role = 'admin'
+                )
+            )
+        )
+    );

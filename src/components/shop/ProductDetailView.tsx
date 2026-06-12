@@ -213,37 +213,39 @@ export default function ProductDetailView({ productId, onBack }: ProductDetailVi
             </View>
 
             {/* Actions Buttons */}
-            <View style={styles.actionsContainer}>
-              <Pressable
-                style={({ pressed }) => [
-                  styles.cartBtn,
-                  { backgroundColor: cartSuccess ? colors.success : colors.primary },
-                  pressed && styles.btnPressed
-                ]}
-                onPress={handleAddToCart}
-              >
-                <ThemedText style={styles.btnText}>
-                  {cartSuccess ? '✓ Added to Cart' : '🛒 Add to Cart'}
-                </ThemedText>
-              </Pressable>
-
-              <Pressable
-                style={({ pressed }) => [
-                  styles.chatBtn,
-                  { borderColor: colors.primary },
-                  pressed && styles.btnPressed
-                ]}
-                onPress={handleContactSeller}
-              >
-                {chatInitiated ? (
-                  <ActivityIndicator size="small" color={colors.primary} />
-                ) : (
-                  <ThemedText style={[styles.chatBtnText, { color: colors.primary }]}>
-                    💬 Contact Seller
+            {user?.role !== 'admin' && (
+              <View style={styles.actionsContainer}>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.cartBtn,
+                    { backgroundColor: cartSuccess ? colors.success : colors.primary },
+                    pressed && styles.btnPressed
+                  ]}
+                  onPress={handleAddToCart}
+                >
+                  <ThemedText style={styles.btnText}>
+                    {cartSuccess ? '✓ Added to Cart' : '🛒 Add to Cart'}
                   </ThemedText>
-                )}
-              </Pressable>
-            </View>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.chatBtn,
+                    { borderColor: colors.primary },
+                    pressed && styles.btnPressed
+                  ]}
+                  onPress={handleContactSeller}
+                >
+                  {chatInitiated ? (
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  ) : (
+                    <ThemedText style={[styles.chatBtnText, { color: colors.primary }]}>
+                      💬 Contact Seller
+                    </ThemedText>
+                  )}
+                </Pressable>
+              </View>
+            )}
 
           </View>
         </View>
