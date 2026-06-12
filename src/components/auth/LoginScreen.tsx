@@ -133,11 +133,10 @@ export default function LoginScreen({ onNavigate }: LoginScreenProps) {
           </Pressable>
         </View>
 
-        {/* Hint accounts */}
         <View style={[styles.hintBox, { backgroundColor: colors.backgroundElement }]}>
-          <ThemedText type="smallBold" style={{ marginBottom: 4 }}>Demo Logins (Mock Mode):</ThemedText>
+          <ThemedText type="smallBold" style={{ marginBottom: 4 }}>Demo Logins:</ThemedText>
           <ThemedText type="small">Client: <ThemedText type="code">buyer@revive.com</ThemedText> / password: <ThemedText type="code">buyer123</ThemedText></ThemedText>
-          <ThemedText type="small">Admin: <ThemedText type="code">admin@revive.com</ThemedText> / password: <ThemedText type="code">admin123</ThemedText></ThemedText>
+          <ThemedText type="small">Admin: <ThemedText type="code">admin@revivemarket.com</ThemedText> / password: <ThemedText type="code">adminpassword123</ThemedText></ThemedText>
         </View>
       </View>
     </ThemedView>
