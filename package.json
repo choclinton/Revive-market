@@ -1,7 +1,15 @@
 {
   "name": "revive-market",
-  "main": "expo-router/entry",
   "version": "1.0.0",
+  "scripts": {
+    "start": "expo start --web",
+    "build": "expo export -p web",
+    "reset-project": "node ./scripts/reset-project.js",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "expo lint"
+  },
   "dependencies": {
     "@expo/ui": "~56.0.16",
     "@expo/vector-icons": "^15.1.1",
@@ -36,14 +44,6 @@
   "devDependencies": {
     "@types/react": "~19.2.2",
     "typescript": "~6.0.3"
-  },
-  "scripts": {
-    "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web",
-    "lint": "expo lint"
   },
   "private": true
 }
