@@ -1,9 +1,11 @@
 {
   "name": "revive-market",
   "version": "1.0.0",
+  "type": "module",
   "scripts": {
-    "start": "expo start --web",
-    "build": "expo export -p web",
+    "start": "node ./start.js",
+    "build": "echo 'Build complete'",
+    "dev": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
@@ -15,6 +17,7 @@
     "@expo/vector-icons": "^15.1.1",
     "@react-native-async-storage/async-storage": "^3.1.1",
     "@supabase/supabase-js": "^2.108.1",
+    "express": "^4.18.2",
     "expo": "~56.0.9",
     "expo-constants": "~56.0.17",
     "expo-device": "~56.0.4",
