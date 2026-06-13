@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node ./start.js",
-    "build": "echo 'Build complete'",
+    "build": "expo export -p web",
     "dev": "expo start",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
