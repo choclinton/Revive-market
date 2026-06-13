@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
-import { View, StyleSheet, ScrollView, Pressable, Image, ActivityIndicator, TextInput, Modal } from 'react-native';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import { View, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput, Modal } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -95,7 +96,7 @@ export default function CartScreen() {
   };
 
   // Calculate delivery fee dynamically based on location in Cameroon
-  const getDeliveryFee = () => {
+  const deliveryFee = useMemo(() => {
     if (deliveryType === 'pickup') return 0;
     const region = deliveryRegion.toLowerCase();
     if (region.includes('douala') || region.includes('yaoundé') || region.includes('yaounde')) {
@@ -105,15 +106,19 @@ export default function CartScreen() {
       return 1000;
     }
     return 2000; // other towns
-  };
+  }, [deliveryType, deliveryRegion]);
 
-  const getSubtotal = () => {
-    return cartItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
-  };
+  const subtotal = useMemo(
+    () => cartItems.reduce((sum, item) => sum + item.product.price * item.quantity, 0),
+    [cartItems]
+  );
 
-  const getGrandTotal = () => {
-    return getSubtotal() + getDeliveryFee();
-  };
+  const grandTotal = useMemo(() => subtotal + deliveryFee, [subtotal, deliveryFee]);
+
+  // Legacy helpers kept for backward compat in JSX
+  const getDeliveryFee = () => deliveryFee;
+  const getSubtotal = () => subtotal;
+  const getGrandTotal = () => grandTotal;
 
   const handleCheckout = () => {
     if (cartItems.length === 0) return;
@@ -187,7 +192,7 @@ export default function CartScreen() {
             <View style={styles.section}>
               {cartItems.map((item) => (
                 <View key={item.product.id} style={[styles.cartItemRow, { backgroundColor: colors.backgroundElement }]}>
-                  <Image source={{ uri: item.product.images[0] }} style={styles.itemImage} resizeMode="cover" />
+                  <Image source={{ uri: item.product.images[0] }} style={styles.itemImage} contentFit="cover" />
                   
                   <View style={styles.itemDetails}>
                     <ThemedText type="smallBold" numberOfLines={1}>{item.product.title}</ThemedText>

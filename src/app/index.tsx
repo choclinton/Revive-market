@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ScrollView, TextInput, Pressable, Image, Dimensions, Platform, ActivityIndicator } from 'react-native';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { View, StyleSheet, ScrollView, TextInput, Pressable, Dimensions, Platform, ActivityIndicator, FlatList } from 'react-native';
+import { Image } from 'expo-image';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -9,9 +10,10 @@ import { dataService, Product, CAMEROON_TOWNS, CATEGORIES } from '../services/da
 import ProductDetailView from '../components/shop/ProductDetailView';
 import { useAuth } from '../context/AuthContext';
 import { useRouter } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function HomeScreen() {
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' || !scheme ? 'light' : scheme];
   const router = useRouter();
@@ -120,16 +122,26 @@ export default function HomeScreen() {
             <Image
               source={require('@/assets/images/revive-logo.png')}
               style={styles.logo}
-              resizeMode="contain"
+              contentFit="contain"
             />
             <View>
               <ThemedText type="smallBold" style={styles.brandTitle}>REVIVE MARKET</ThemedText>
               <ThemedText type="small" style={{ opacity: 0.6 }}>Electronics Marketplace</ThemedText>
             </View>
           </View>
-          <Pressable onPress={signOut} style={[styles.logoutBtn, { borderColor: colors.textSecondary }]}>
-            <ThemedText type="small" style={{ color: colors.textSecondary }}>Sign Out</ThemedText>
-          </Pressable>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: Spacing.two }}>
+            {user?.role === 'client' && (
+              <Pressable
+                onPress={() => router.push('/chat?support=true')}
+                style={({ pressed }) => [{ padding: Spacing.one, marginRight: Spacing.one }, pressed && { opacity: 0.7 }]}
+              >
+                <MaterialCommunityIcons name="headset" size={24} color={colors.primary} />
+              </Pressable>
+            )}
+            <Pressable onPress={signOut} style={[styles.logoutBtn, { borderColor: colors.textSecondary }]}>
+              <ThemedText type="small" style={{ color: colors.textSecondary }}>Sign Out</ThemedText>
+            </Pressable>
+          </View>
         </View>
 
         {/* Outer Layout containing sidebar filters on desktop */}
@@ -311,19 +323,22 @@ export default function HomeScreen() {
                 <ThemedText style={{ opacity: 0.6 }}>No products match your filters.</ThemedText>
               </View>
             ) : (
-              <ScrollView contentContainerStyle={styles.productsGrid} showsVerticalScrollIndicator={false}>
-                {products.map((item) => {
+              <FlatList
+                key={columnCount}
+                data={products}
+                numColumns={columnCount}
+                keyExtractor={useCallback((item: any) => item.id, [])}
+                renderItem={useCallback(({ item }: { item: any }) => {
                   const qDetails = getQualityStyle(item.quality);
                   return (
                     <Pressable
-                      key={item.id}
                       style={[
                         styles.productCard,
                         { width: isLargeScreen ? cardWidth : '100%', backgroundColor: colors.backgroundElement }
                       ]}
                       onPress={() => setSelectedProductId(item.id)}
                     >
-                      <Image source={{ uri: item.images[0] }} style={styles.cardImage} resizeMode="cover" />
+                      <Image source={{ uri: item.images[0] }} style={styles.cardImage} contentFit="cover" />
                       
                       <View style={styles.cardDetails}>
                         <View style={styles.cardHeaderRow}>
@@ -350,13 +365,32 @@ export default function HomeScreen() {
                       </View>
                     </Pressable>
                   );
-                })}
-              </ScrollView>
+                }, [colors, cardWidth, isLargeScreen])}
+                columnWrapperStyle={columnCount > 1 ? styles.columnWrapper : undefined}
+                contentContainerStyle={styles.productsGrid}
+                showsVerticalScrollIndicator={false}
+                initialNumToRender={6}
+                maxToRenderPerBatch={8}
+                windowSize={5}
+                removeClippedSubviews
+              />
             )}
 
           </View>
         </View>
       </SafeAreaView>
+      {user?.role === 'client' && (
+        <Pressable
+          onPress={() => router.push('/chat?support=true')}
+          style={({ pressed }) => [
+            styles.floatingSupportBtn,
+            { backgroundColor: colors.primary },
+            pressed && { opacity: 0.9, transform: [{ scale: 0.95 }] }
+          ]}
+        >
+          <MaterialCommunityIcons name="headset" size={28} color="#FFF" />
+        </Pressable>
+      )}
     </ThemedView>
   );
 }
@@ -517,10 +551,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   productsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: Spacing.three,
     paddingBottom: 100,
+    paddingHorizontal: Spacing.three,
   },
   productCard: {
     borderRadius: 12,
@@ -566,5 +599,24 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: '#E0E0E0',
     paddingTop: 6,
+  },
+  floatingSupportBtn: {
+    position: 'absolute',
+    bottom: 24,
+    right: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+    zIndex: 999,
+  },
+  columnWrapper: {
+    gap: Spacing.three,
   },
 });

@@ -556,7 +556,7 @@ export const dataService = {
         *,
         buyer:profiles(name),
         product:products(*),
-        chat_messages(message, created_at)
+        chat_messages(message, created_at, order:created_at.desc, limit:1)
       `);
 
       if (profile?.role !== 'admin') {
@@ -567,11 +567,8 @@ export const dataService = {
       if (error) throw error;
 
       return (data || []).map((room: any) => {
-        // Find last message
-        const sortedMsgs = (room.chat_messages || []).sort(
-          (a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        );
-        const lastMsg = sortedMsgs[0]?.message || 'No messages yet';
+        // DB returns messages newest-first (ORDER BY created_at DESC, LIMIT 1)
+        const lastMsg = room.chat_messages?.[0]?.message || 'No messages yet';
 
         return {
           id: room.id,
@@ -579,7 +576,7 @@ export const dataService = {
           product_id: room.product_id,
           created_at: room.created_at,
           buyer_name: room.buyer?.name || 'Buyer',
-          product_title: room.product?.title || 'Unknown Product',
+          product_title: room.product?.title || 'Customer Service',
           product_price: room.product?.price ? parseFloat(room.product.price) : 0,
           product_image: room.product?.images?.[0] || 'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=200',
           last_message: lastMsg
@@ -713,6 +710,49 @@ export const dataService = {
         room_id: newRoom.id,
         sender_id: authUser.id,
         message: 'Hello! I am interested in this product.'
+      }]);
+
+      return newRoom.id;
+    }
+  },
+
+  async createSupportChatRoom(): Promise<string> {
+    if (this.isMock()) {
+      return 'room-1';
+    } else {
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      if (!authUser) throw new Error('Not authenticated');
+
+      // Check if room already exists for this user with no product (general support)
+      const { data: existing, error: findErr } = await supabase
+        .from('chat_rooms')
+        .select('id')
+        .eq('buyer_id', authUser.id)
+        .is('product_id', null);
+
+      if (findErr) throw findErr;
+
+      if (existing && existing.length > 0) {
+        return existing[0].id;
+      }
+
+      // Create new room
+      const { data: newRoom, error: createErr } = await supabase
+        .from('chat_rooms')
+        .insert([{
+          buyer_id: authUser.id,
+          product_id: null
+        }])
+        .select()
+        .single();
+
+      if (createErr) throw createErr;
+
+      // Add a system welcome message
+      await supabase.from('chat_messages').insert([{
+        room_id: newRoom.id,
+        sender_id: authUser.id,
+        message: 'Hello! I need assistance from Customer Support.'
       }]);
 
       return newRoom.id;

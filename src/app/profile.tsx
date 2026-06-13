@@ -65,6 +65,7 @@ export default function ProfileScreen() {
   const [sellDevice, setSellDevice] = useState('');
   const [sellCondition, setSellCondition] = useState('');
   const [sellPrice, setSellPrice] = useState('');
+  const [sellImage, setSellImage] = useState<string | null>(null);
   const [isSubmittingSell, setIsSubmittingSell] = useState(false);
 
   const handlePickProductImage = async () => {
@@ -86,6 +87,29 @@ export default function ProfileScreen() {
       }
     } catch (err) {
       console.error('Error picking product image:', err);
+      alert('Failed to select image.');
+    }
+  };
+
+  const handlePickSellImage = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        alert('Permission to access media library is required!');
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.8,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setSellImage(result.assets[0].uri);
+      }
+    } catch (err) {
+      console.error('Error picking sell image:', err);
       alert('Failed to select image.');
     }
   };
@@ -186,15 +210,21 @@ export default function ProfileScreen() {
     }
     setIsSubmittingSell(true);
     try {
-      // 1. Log the trade-in request
+      // 1. Upload the image if one was picked
+      let uploadedUrl = 'https://images.unsplash.com/photo-1588508065123-287b28e01397?w=500&auto=format&fit=crop';
+      if (sellImage) {
+        uploadedUrl = await dataService.uploadImage('product-images', sellImage);
+      }
+
+      // 2. Log the trade-in request
       await dataService.createTradeInRequest(sellDevice, sellCondition, parseFloat(sellPrice));
       
-      // 2. Create a "Trade-In" product to act as the chat anchor (stock 0 so it's not buyable)
+      // 3. Create a "Trade-In" product to act as the chat anchor (stock 0 so it's not buyable)
       const tradeInProduct = await dataService.createProduct({
         title: `Sell Offer: ${sellDevice}`,
         description: `Condition: ${sellCondition}`,
         price: parseFloat(sellPrice),
-        images: ['https://images.unsplash.com/photo-1588508065123-287b28e01397?w=500&auto=format&fit=crop'], // Generic trade-in image
+        images: [uploadedUrl],
         location: user?.address || 'Platform',
         category: 'Accessories', 
         quality: 'C',
@@ -203,10 +233,10 @@ export default function ProfileScreen() {
         specs: { tradeIn: 'true' }
       });
 
-      // 3. Create the chat room for this trade-in
+      // 4. Create the chat room for this trade-in
       const roomId = await dataService.createChatRoom(tradeInProduct.id);
       
-      // 4. Send the automated first message from the client
+      // 5. Send the automated first message from the client
       await dataService.sendMessage(roomId, `Hello, I would like to sell my device.\n\nDevice: ${sellDevice}\nCondition: ${sellCondition}\nMy Proposed Price: ${parseFloat(sellPrice).toLocaleString()} FCFA`);
 
       alert('Your sell request has been submitted! We have opened a support chat for you.');
@@ -215,6 +245,7 @@ export default function ProfileScreen() {
       setSellDevice('');
       setSellCondition('');
       setSellPrice('');
+      setSellImage(null);
       
       // Navigate to chat
       router.push('/chat');
@@ -564,6 +595,24 @@ export default function ProfileScreen() {
                         value={sellPrice}
                         onChangeText={setSellPrice}
                       />
+                    </View>
+                    <View style={styles.inputGroup}>
+                      <ThemedText type="smallBold">Device Photo</ThemedText>
+                      {sellImage ? (
+                        <View style={styles.imageUploadPreviewRow}>
+                          <Image source={{ uri: sellImage }} style={styles.productUploadThumb} />
+                          <Pressable onPress={() => setSellImage(null)} style={[styles.uploadBtn, { backgroundColor: '#FF3B30', marginLeft: Spacing.two }]}>
+                            <ThemedText style={{ color: '#FFF', fontWeight: '700' }}>✕ Remove Photo</ThemedText>
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <Pressable
+                          style={[styles.uploadBtn, { backgroundColor: colors.primary + '15', borderColor: colors.primary, borderWidth: 1, borderStyle: 'dashed' }]}
+                          onPress={handlePickSellImage}
+                        >
+                          <ThemedText style={{ color: colors.primary, fontWeight: '700' }}>📷 Upload Device Image</ThemedText>
+                        </Pressable>
+                      )}
                     </View>
                     <View style={{ flexDirection: 'row', gap: Spacing.two }}>
                       <Pressable

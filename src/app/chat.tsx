@@ -9,13 +9,15 @@ import { useAuth } from '../context/AuthContext';
 import { supabase } from '../utils/supabase';
 import { dataService, ChatRoom, ChatMessage, Appointment } from '../services/dataService';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 export default function ChatScreen() {
   const { user } = useAuth();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' || !scheme ? 'light' : scheme];
   const router = useRouter();
+  const { support } = useLocalSearchParams();
 
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
@@ -196,6 +198,25 @@ export default function ChatScreen() {
     }
     return list;
   };
+
+  const handleStartSupportChat = async () => {
+    try {
+      setLoading(true);
+      const roomId = await dataService.createSupportChatRoom();
+      setActiveRoomId(roomId);
+    } catch (err) {
+      console.error('Failed to create/open support chat:', err);
+      alert('Failed to connect to customer support.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (support === 'true' && user?.role === 'client') {
+      handleStartSupportChat();
+    }
+  }, [support, user]);
 
   // Load chat rooms
   useEffect(() => {
@@ -595,12 +616,22 @@ export default function ChatScreen() {
               
               {activeRoom && (
                 <View style={styles.activeProductRow}>
-                  <Image source={{ uri: activeRoom.product_image }} style={styles.productThumbnail} resizeMode="cover" />
+                  {activeRoom.product_title === 'Customer Service' ? (
+                    <View style={[styles.productThumbnail, { backgroundColor: colors.primary + '15', justifyContent: 'center', alignItems: 'center' }]}>
+                      <MaterialCommunityIcons name="headset" size={20} color={colors.primary} />
+                    </View>
+                  ) : (
+                    <Image source={{ uri: activeRoom.product_image }} style={styles.productThumbnail} resizeMode="cover" />
+                  )}
                   <View style={{ flex: 1 }}>
                     <ThemedText type="smallBold" numberOfLines={1}>{activeRoom.product_title}</ThemedText>
-                    <ThemedText type="small" style={{ color: colors.primary, fontWeight: '700' }}>
-                      {activeRoom.product_price ? activeRoom.product_price.toLocaleString() : '0'} FCFA
-                    </ThemedText>
+                    {activeRoom.product_title === 'Customer Service' ? (
+                      <ThemedText type="small" style={{ opacity: 0.6 }}>Active Support Agent</ThemedText>
+                    ) : (
+                      <ThemedText type="small" style={{ color: colors.primary, fontWeight: '700' }}>
+                        {activeRoom.product_price ? activeRoom.product_price.toLocaleString() : '0'} FCFA
+                      </ThemedText>
+                    )}
                   </View>
                 </View>
               )}
@@ -797,20 +828,40 @@ export default function ChatScreen() {
         ) : (
           /* Chat Rooms List View */
           <View style={{ flex: 1 }}>
-            <View style={styles.listHeader}>
+            <View style={[styles.listHeader, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
               <ThemedText type="subtitle" style={styles.headerTitle}>Seller Conversations</ThemedText>
+              {user?.role === 'client' && (
+                <Pressable 
+                  onPress={handleStartSupportChat} 
+                  style={({ pressed }) => [{ padding: Spacing.one }, pressed && { opacity: 0.7 }]}
+                >
+                  <MaterialCommunityIcons name="message-plus-outline" size={26} color={colors.primary} />
+                </Pressable>
+              )}
             </View>
 
             {user?.role === 'client' && (
-              <Pressable
-                style={({pressed}) => [
-                  { backgroundColor: colors.primary, padding: Spacing.three, marginHorizontal: Spacing.three, marginTop: Spacing.three, borderRadius: 12, alignItems: 'center' },
-                  pressed && { opacity: 0.8 }
-                ]}
-                onPress={() => router.push('/profile')}
-              >
-                <ThemedText style={{ color: '#FFF', fontWeight: '800' }}>💰 Sell Your Device</ThemedText>
-              </Pressable>
+              <View style={{ flexDirection: 'row', gap: Spacing.two, paddingHorizontal: Spacing.three, marginTop: Spacing.three }}>
+                <Pressable
+                  style={({pressed}) => [
+                    { flex: 1, backgroundColor: colors.primary, padding: Spacing.three, borderRadius: 12, alignItems: 'center' },
+                    pressed && { opacity: 0.8 }
+                  ]}
+                  onPress={() => router.push('/profile')}
+                >
+                  <ThemedText style={{ color: '#FFF', fontWeight: '800' }}>💰 Sell Device</ThemedText>
+                </Pressable>
+                
+                <Pressable
+                  style={({pressed}) => [
+                    { flex: 1, backgroundColor: colors.success || '#22C55E', padding: Spacing.three, borderRadius: 12, alignItems: 'center' },
+                    pressed && { opacity: 0.8 }
+                  ]}
+                  onPress={handleStartSupportChat}
+                >
+                  <ThemedText style={{ color: '#FFF', fontWeight: '800' }}>🎧 Support Chat</ThemedText>
+                </Pressable>
+              </View>
             )}
 
             <ScrollView contentContainerStyle={styles.roomsList} showsVerticalScrollIndicator={false}>
@@ -820,7 +871,13 @@ export default function ChatScreen() {
                   style={[styles.roomCard, { backgroundColor: colors.backgroundElement }]}
                   onPress={() => setActiveRoomId(room.id)}
                 >
-                  <Image source={{ uri: room.product_image }} style={styles.roomImage} resizeMode="cover" />
+                  {room.product_title === 'Customer Service' ? (
+                    <View style={[styles.roomImage, { backgroundColor: colors.primary + '15', justifyContent: 'center', alignItems: 'center' }]}>
+                      <MaterialCommunityIcons name="headset" size={28} color={colors.primary} />
+                    </View>
+                  ) : (
+                    <Image source={{ uri: room.product_image }} style={styles.roomImage} resizeMode="cover" />
+                  )}
                   
                   <View style={styles.roomMeta}>
                     <ThemedText type="smallBold">{room.product_title}</ThemedText>

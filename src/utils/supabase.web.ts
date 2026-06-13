@@ -27,6 +27,10 @@ const ssrSafeStorage = {
   },
 };
 
+// Use native WebSocket on browser/React Native; fall back to 'ws' on Node.js (Metro/SSR)
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const WebSocketImpl = typeof WebSocket !== 'undefined' ? WebSocket : require('ws');
+
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     storage: ssrSafeStorage,
@@ -36,8 +40,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
   realtime: {
     // @ts-ignore
-    transport: WebSocket,
+    transport: WebSocketImpl,
     params: isMockMode ? { eventsPerSecond: 0 } : { eventsPerSecond: 10 },
   },
 });
-
